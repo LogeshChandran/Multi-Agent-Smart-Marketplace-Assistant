@@ -34,21 +34,21 @@ jobs:
 
       - name: Upload error logs (optional)
         if: failure()
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: scraper-errors
           path: scraper_errors.log
 
       - name: Upload products.db (optional)
         if: success()
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: products-db
           path: products.db  # Path to the SQLite database file
 
       - name: Upload results (optional)
         if: success()
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: product-scrape-results
           path: product_scrape.png
