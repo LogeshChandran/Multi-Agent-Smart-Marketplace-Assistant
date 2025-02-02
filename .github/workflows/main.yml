@@ -33,22 +33,25 @@ jobs:
           YOUR_API_KEY: ${{ secrets.YOUR_API_KEY }}  # If your script uses environment variables
 
       - name: Upload error logs (optional)
-        if: failure()
         uses: actions/upload-artifact@v4  # Use v4 (or v5)
         with:
           name: scraper-errors
           path: scraper_errors.log
 
       - name: Upload products.db (optional)
-        if: success()
         uses: actions/upload-artifact@v4  # Use v4 (or v5)
         with:
           name: products-db
           path: products.db  # Path to the SQLite database file
 
       - name: Upload results (optional)
-        if: success()
         uses: actions/upload-artifact@v4  # Use v4 (or v5)
         with:
           name: product-scrape-results
           path: product_scrape.png
+
+      - name: Upload results (optional)
+        uses: actions/upload-artifact@v4  # Use v4 (or v5)
+        with:
+          name: products_data
+          path: products_data.xlsx
