@@ -303,7 +303,6 @@ async def main(search_url: str):
     result = await run_workflow(search_url)
     print(result)
 
-
 if __name__ == "__main__":
 
     search_url = "https://www.amazon.in/s?k=cosmetics&i=beauty&rh=n%3A1355016031%2Cp_72%3A1318476031%2Cp_n_pct-off-with-tax%3A2665399031&dc&page={count}&crid=3Q3HDNP43NXDY&qid=1738431284&rnid=2665398031&sprefix=%2Caps%2C281&xpid=UrO0XsM1GNFXK&ref=sr_pg_{count}"
@@ -314,4 +313,4 @@ if __name__ == "__main__":
         new_search_url = search_url.format(count=page)
         result = asyncio.run(main(new_search_url))
         print(result)
-        break
+        # break
