@@ -28,7 +28,7 @@ jobs:
 
       - name: Run Python script
         run: |
-          python your_script_name.py  # Replace with the name of your Python script
+          python product_scrape.py  # Replace with the name of your Python script
         env:
           YOUR_API_KEY: ${{ secrets.YOUR_API_KEY }}  # If your script uses environment variables
 
