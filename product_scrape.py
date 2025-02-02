@@ -9,6 +9,7 @@ import logging
 import asyncio
 from IPython.display import display, Image as IPImage
 from langchain_core.pydantic_v1 import BaseModel, Field
+import time
 
 logging.basicConfig(
     filename='scraper_errors.log',
@@ -50,44 +51,79 @@ headers = {
     "Connection": "keep-alive",
 }
 
-def get_number_of_pages(search_url: str) -> int:
-    response = requests.get(search_url, headers=headers)
-    response.raise_for_status()
-    soup = BeautifulSoup(response.content, "html.parser")
-    page_numbers = soup.find("span", class_="s-pagination-item s-pagination-disabled") 
-    page_count = page_numbers.get_text(strip=True) if page_numbers else 1
-    logging.info(f"Total number of pages: {page_count}")
-    print(page_count)
-    return page_count
+def get_number_of_pages(search_url: str, max_retries: int = 5, backoff_factor: int = 2) -> int:
+    try:
+        response = requests.get(search_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, "html.parser")
+        page_numbers = soup.find("span", class_="s-pagination-item s-pagination-disabled") 
+        page_count = page_numbers.get_text(strip=True) if page_numbers else 1
+        logging.info(f"Total number of pages: {page_count}")
+        print(page_count)
+        return page_count
+    except requests.exceptions.HTTPError as err:
+        if err.response.status_code == 503:
+            if max_retries > 0:
+                logging.info(f"Retrying due to HTTP 503 error")
+                retries = max_retries
+                wait_time = random.uniform(1, backoff_factor ** retries)
+                time.sleep(wait_time)
+                return get_number_of_pages(search_url, max_retries - 1, backoff_factor)
+            else:
+                logging.error(f"Max retries reached: {max_retries}")
+                return 1
+        else:
+            logging.error(f"An error occurred: {str(err)} in get_number_of_pages")
+            return 1
+    except Exception as e:
+        logging.error(f"An error occurred: {str(e)} in get_number_of_pages")
+        return 1
     
 # Step 3: Scrape All Product URLs from Homepage
 def scrape_product_urls(state: ScraperState) -> ScraperState:
-    try:
-        logging.info(f"Scraping product URLs Started")
-        response = requests.get(state.homepage_url, headers=headers)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, "html.parser")
+    max_retries = 5
+    backoff_factor = 2
+    retries = 0
+    while retries < max_retries:
+        try:
+            logging.info(f"Scraping product URLs Started")
+            response = requests.get(state.homepage_url, headers=headers)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.content, "html.parser")
 
-        product_links = []
-        for a_tag in soup.select("a[href*='/dp/']"):
-            href = a_tag["href"]
-            url_parts = href.split("/")
-            product_id = url_parts[url_parts.index("dp") + 1] if "dp" in url_parts else None
-            product_url = f"https://www.amazon.in/dp/{product_id}/"
-            product_links.append(product_url)
+            product_links = []
+            for a_tag in soup.select("a[href*='/dp/']"):
+                href = a_tag["href"]
+                url_parts = href.split("/")
+                product_id = url_parts[url_parts.index("dp") + 1] if "dp" in url_parts else None
+                product_url = f"https://www.amazon.in/dp/{product_id}/"
+                product_links.append(product_url)
 
-        product_links = list(set(product_links))  # Remove duplicates
-        # product_links = product_links[:10]  # Limit to 10 URLs for testing
-        state.product_urls = product_links
-        state.status = "SCRAPING_PRODUCTS"
-        logging.info(f"Scraping product URLs Completed")
-        logging.info(f"Total product URLs found: {len(product_links)}")
-        return state
-    except Exception as e:
-        logging.error(f"An error occurred: {str(e)} in scrape_product_urls")
-        state.errors.append(str(e))
-        state.status = "DONE"
-        return state
+            product_links = list(set(product_links))  # Remove duplicates
+            # product_links = product_links[:10]  # Limit to 10 URLs for testing
+            state.product_urls = product_links
+            state.status = "SCRAPING_PRODUCTS"
+            logging.info(f"Scraping product URLs Completed")
+            logging.info(f"Total product URLs found: {len(product_links)}")
+            return state
+        except requests.exceptions.HTTPError as err:
+            if err.response.status_code == 503:
+                retries += 1
+                wait_time = random.uniform(1, backoff_factor ** retries)
+                logging.warning(f"503 Error encountered. Retrying in {wait_time:.2f} seconds... (Attempt {retries}/{max_retries})")
+                time.sleep(wait_time)
+            else:
+                logging.error(f"HTTPError encountered: {err}")
+                state.errors.append(str(err))
+                state.status = "DONE"
+                return state
+        except Exception as e:
+            logging.error(f"An error occurred: {str(e)} in scrape_product_urls")
+            state.errors.append(str(e))
+            state.status = "DONE"
+            return state
+    logging.info(f"Failed to fetch {search_url} after {max_retries} retries.")
+    return state
 
 # Step 4: Scrape Product Details
 def scrape_product_details(state: ScraperState) -> ScraperState:
@@ -106,50 +142,67 @@ def scrape_product_details(state: ScraperState) -> ScraperState:
         
         logging.info(f"Scraping product details for {state.current_product}")
         logging.info(f"Scraping product details Started for {state.current_product}")
-    
-        try:
-            response = requests.get(product_url, headers=headers)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.content, "html.parser")
 
-            product_name = soup.find("span", id="productTitle")
-            price = soup.find("span", class_="a-price-whole")
-            offer = soup.find("span", class_="savingsPercentage")
-            rating = soup.find("span", class_="a-size-base a-color-base")
-            brand = soup.find("tr", class_="po-brand")
-            description_list = soup.select("#feature-bullets ul li span.a-list-item")
-            description = soup.find("div", id="productDescription")
-            image = soup.find("img", id="landingImage")
+        max_retries = 3
+        backoff_factor = 2
+        retries = 0
+        while retries < max_retries:
+            try:
+                response = requests.get(product_url, headers=headers)
+                response.raise_for_status()
+                soup = BeautifulSoup(response.content, "html.parser")
 
-            product_id = product_url.split("/dp/")[1].split("/")[0]
+                product_name = soup.find("span", id="productTitle")
+                price = soup.find("span", class_="a-price-whole")
+                offer = soup.find("span", class_="savingsPercentage")
+                rating = soup.find("span", class_="a-size-base a-color-base")
+                brand = soup.find("tr", class_="po-brand")
+                description_list = soup.select("#feature-bullets ul li span.a-list-item")
+                description = soup.find("div", id="productDescription")
+                image = soup.find("img", id="landingImage")
+                
+                product_id = product_url.split("/dp/")[1].split("/")[0]
 
-            product_data = {
-                "product_id": product_id,
-                "product_url": product_url,
-                "product_name": product_name.get_text(strip=True) if product_name else None,
-                "price": f"₹{price.get_text(strip=True)}" if price else None,
-                "offer": offer.get_text(strip=True) if offer else None,
-                "rating": (
-                    float(rating.get_text(strip=True)) 
-                    if rating and rating.get_text(strip=True).replace(".", "", 1).isdigit() 
-                    else None
-                ),
-                # "rating": float(rating.get_text(strip=True)) if rating else None,
-                "brand": brand.find_all("td")[1].get_text(strip=True) if brand else None,
-                "description1": ", ".join([desc.get_text(strip=True) for desc in description_list]) if description_list else None,
-                "product_description": description.get_text(strip=True) if description else None,
-                "image_url": image["src"] if image else None,
-            }
+                product_data = {
+                    "product_id": product_id,
+                    "product_url": product_url,
+                    "product_name": product_name.get_text(strip=True) if product_name else None,
+                    "price": f"₹{price.get_text(strip=True)}" if price else None,
+                    "offer": offer.get_text(strip=True) if offer else None,
+                    "rating": (
+                        float(rating.get_text(strip=True)) 
+                        if rating and rating.get_text(strip=True).replace(".", "", 1).isdigit() 
+                        else None
+                    ),
+                    # "rating": float(rating.get_text(strip=True)) if rating else None,
+                    "brand": brand.find_all("td")[1].get_text(strip=True) if brand else None,
+                    "description1": ", ".join([desc.get_text(strip=True) for desc in description_list]) if description_list else None,
+                    "product_description": description.get_text(strip=True) if description else None,
+                    "image_url": image["src"] if image else None,
+                }
 
-            # state.product_details = product_data
-            state.product_details.append(product_data)
-            state.status = "SAVING_TO_DB"
-            # return product_data
-            logging.info(f"Scraping product details Completed for {product_url}")
-        except Exception as e:
-            logging.error(f"An error occurred: {str(e)} in scrape_product_details")
-            state.product_urls.append(state.current_product)  # Add back the failed URL
-            state.errors.append(str(e))
+                # state.product_details = product_data
+                state.product_details.append(product_data)
+                state.status = "SAVING_TO_DB"
+                # return product_data
+                logging.info(f"Scraping product details Completed for {product_url}")
+                break
+            except requests.exceptions.HTTPError as err:
+                if err.response.status_code == 503:
+                    retries += 1
+                    wait_time = random.uniform(1, backoff_factor ** retries)
+                    logging.warning(f"503 Error encountered. Retrying in {wait_time:.2f} seconds... (Attempt {retries}/{max_retries})")
+                    time.sleep(wait_time)
+                else:
+                    logging.error(f"HTTPError encountered: {err}")
+                    state.errors.append(str(err))
+                    state.status = "DONE"
+                    return state
+            except Exception as e:
+                logging.error(f"An error occurred: {str(e)} in scrape_product_details")
+                state.product_urls.append(state.current_product)  # Add back the failed URL
+                state.errors.append(str(e))
+                break
     return state
 
 # Step 5: Save Data to SQLite Database
@@ -314,3 +367,14 @@ if __name__ == "__main__":
         result = asyncio.run(main(new_search_url))
         print(result)
         # break
+
+    import sqlite3
+    import pandas as pd
+
+    conn = sqlite3.connect("products.db")
+    query = "SELECT * FROM products"
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    df.to_excel('products_data.xlsx', index=False)
+
+    print("Data has been saved to 'products_data.xlsx'")
