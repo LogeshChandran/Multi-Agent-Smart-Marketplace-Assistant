@@ -1,0 +1,54 @@
+name: Python Scraper Workflow
+
+on:
+  push:
+    branches:
+      - main  # Trigger action on push to the main branch
+  pull_request:
+    branches:
+      - main  # Trigger action on PR targeting the main branch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'  # Choose the appropriate Python version
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt  # Assumes you have a requirements.txt
+
+      - name: Run Python script
+        run: |
+          python your_script_name.py  # Replace with the name of your Python script
+        env:
+          YOUR_API_KEY: ${{ secrets.YOUR_API_KEY }}  # If your script uses environment variables
+
+      - name: Upload error logs (optional)
+        if: failure()
+        uses: actions/upload-artifact@v2
+        with:
+          name: scraper-errors
+          path: scraper_errors.log
+
+      - name: Upload products.db (optional)
+        if: success()
+        uses: actions/upload-artifact@v2
+        with:
+          name: products-db
+          path: products.db  # Path to the SQLite database file
+
+      - name: Upload results (optional)
+        if: success()
+        uses: actions/upload-artifact@v2
+        with:
+          name: product-scrape-results
+          path: product_scrape.png
